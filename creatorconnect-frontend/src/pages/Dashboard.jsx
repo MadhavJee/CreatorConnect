@@ -1,19 +1,25 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { useAuth } from '../context/AuthContext';
-import { getAssets, uploadAsset, deleteAsset } from '../services/api';
+import {
+    fetchAssets, uploadAssetThunk, deleteAssetThunk,
+    selectAssets, selectAssetsLoading, selectUploading, selectAssetError, clearError
+} from '../store/slices/assetSlice';
 import styles from './Dashboard.module.css';
 
 export default function Dashboard() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const [assets, setAssets] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [uploading, setUploading] = useState(false);
-    const [error, setError] = useState('');
-    const [activeTab, setActiveTab] = useState('assets');
+    const dispatch = useDispatch();
     const fileRef = useRef();
 
+    const assets = useSelector(selectAssets);
+    const loading = useSelector(selectAssetsLoading);
+    const uploading = useSelector(selectUploading);
+    const error = useSelector(selectAssetError);
+
+    const [activeTab, setActiveTab] = useState('assets');
     const [messages, setMessages] = useState([
         { id: 1, from: 'system', text: `Welcome, ${user?.name}! ` }
     ]);
@@ -21,49 +27,20 @@ export default function Dashboard() {
     const [chatLoading, setChatLoading] = useState(false);
 
     useEffect(() => {
-        fetchAssets();
-    }, []);
-
-    const fetchAssets = async () => {
-        try {
-            const res = await getAssets();
-            setAssets(res.data.assets);
-        } catch (err) {
-            setError(err.response?.data?.message || 'Failed to load assets');
-        } finally {
-            setLoading(false);
-        }
-    };
+        dispatch(fetchAssets());
+    }, [dispatch]);
 
     const handleUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         const formData = new FormData();
         formData.append('file', file);
-
-        setUploading(true);
-        setError('');
-        try {
-            const res = await uploadAsset(formData);
-            setAssets(prev => [res.data.asset, ...prev]);
-        } catch (err) {
-            console.log('Upload error:', err.response?.data);
-            setError(err.response?.data?.message || err.message || 'Upload failed');
-        } finally {
-            setUploading(false);
-            fileRef.current.value = '';
-        }
+        dispatch(uploadAssetThunk(formData));
+        fileRef.current.value = '';
     };
 
-    const handleDelete = async (id) => {
-        setError('');
-        try {
-            await deleteAsset(id);
-            setAssets(prev => prev.filter(a => a._id !== id));
-        } catch (err) {
-            setError(err.response?.data?.message || 'Delete failed');
-        }
+    const handleDelete = (id) => {
+        dispatch(deleteAssetThunk(id));
     };
 
     const handleDownload = (url, filename) => {
@@ -96,45 +73,33 @@ export default function Dashboard() {
 
     return (
         <div className={styles.container}>
-            {/* Sidebar */}
             <div className={styles.sidebar}>
                 <div className={styles.sidebarHeader}>
                     <div className={styles.logo}>CC</div>
                     <span className={styles.appName}>Creator Connect</span>
                 </div>
-
                 <nav className={styles.nav}>
                     <div
                         className={`${styles.navItem} ${activeTab === 'assets' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('assets')}
-                    >
-                         Assets
-                    </div>
+                    > Assets</div>
                     <div
                         className={`${styles.navItem} ${activeTab === 'chat' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('chat')}
-                    >
-                         Chat
-                    </div>
+                    > Chat</div>
                 </nav>
-
                 <div className={styles.sidebarBottom}>
                     <div className={styles.userInfo}>
-                        <div className={styles.avatar}>
-                            {user?.name?.charAt(0).toUpperCase()}
-                        </div>
+                        <div className={styles.avatar}>{user?.name?.charAt(0).toUpperCase()}</div>
                         <div>
                             <p className={styles.userName}>{user?.name}</p>
                             <p className={styles.userRole}>{user?.role}</p>
                         </div>
                     </div>
-                    <button className={styles.logoutBtn} onClick={handleLogout}>
-                        Sign out
-                    </button>
+                    <button className={styles.logoutBtn} onClick={handleLogout}>Sign out</button>
                 </div>
             </div>
 
-            {/* Main Content */}
             <div className={styles.main}>
                 {activeTab === 'assets' ? (
                     <>
@@ -144,9 +109,7 @@ export default function Dashboard() {
                                 <p className={styles.subtitle}>{assets.length} files uploaded</p>
                             </div>
                             <div className={styles.headerActions}>
-                                <span className={styles.tokenBadge}>
-                                     {user?.tokens || 5} tokens
-                                </span>
+                                <span className={styles.tokenBadge}> {user?.tokens || 5} tokens</span>
                                 <button
                                     className={styles.uploadBtn}
                                     onClick={() => fileRef.current.click()}
@@ -164,19 +127,19 @@ export default function Dashboard() {
                             </div>
                         </div>
 
-                        {error && <p className={styles.error}> {error}</p>}
+                        {error && (
+                            <p className={styles.error} onClick={() => dispatch(clearError())}>
+                                 {error} (click to dismiss)
+                            </p>
+                        )}
 
                         {loading ? (
-                            <div className={styles.emptyState}>
-                                <p>Loading...</p>
-                            </div>
+                            <div className={styles.emptyState}><p>Loading...</p></div>
                         ) : assets.length === 0 ? (
                             <div className={styles.emptyState}>
+                                
                                 <p>No assets yet</p>
-                                <button
-                                    className={styles.uploadBtn}
-                                    onClick={() => fileRef.current.click()}
-                                >
+                                <button className={styles.uploadBtn} onClick={() => fileRef.current.click()}>
                                     Upload your first file
                                 </button>
                             </div>
@@ -196,15 +159,11 @@ export default function Dashboard() {
                                                 <button
                                                     className={styles.downloadBtn}
                                                     onClick={() => handleDownload(asset.url, asset.filename)}
-                                                >
-                                                     Download
-                                                </button>
+                                                >⬇ Download</button>
                                                 <button
                                                     className={styles.deleteBtn}
                                                     onClick={() => handleDelete(asset._id)}
-                                                >
-                                                     Delete
-                                                </button>
+                                                >🗑 Delete</button>
                                             </div>
                                         </div>
                                     </div>
@@ -216,9 +175,7 @@ export default function Dashboard() {
                     <div className={styles.chatContainer}>
                         <div className={styles.header}>
                             <h1>Chat</h1>
-                            <span className={styles.tokenBadge}>
-                                 {user?.tokens || 5} tokens
-                            </span>
+                            <span className={styles.tokenBadge}> {user?.tokens || 5} tokens</span>
                         </div>
                         <div className={styles.messages}>
                             {messages.map(msg => (
@@ -235,9 +192,7 @@ export default function Dashboard() {
                                 <div className={`${styles.message} ${styles.bot}`}>
                                     <div className={styles.msgAvatar}>CC</div>
                                     <div className={styles.msgBubble}>
-                                        <span className={styles.typing}>
-                                            <span /><span /><span />
-                                        </span>
+                                        <span className={styles.typing}><span /><span /><span /></span>
                                     </div>
                                 </div>
                             )}
@@ -250,11 +205,7 @@ export default function Dashboard() {
                                 onChange={e => setInput(e.target.value)}
                                 className={styles.chatInput}
                             />
-                            <button
-                                type="submit"
-                                className={styles.sendBtn}
-                                disabled={chatLoading || !input.trim()}
-                            >
+                            <button type="submit" className={styles.sendBtn} disabled={chatLoading || !input.trim()}>
                                 Send →
                             </button>
                         </form>
