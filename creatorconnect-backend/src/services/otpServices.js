@@ -10,7 +10,7 @@ export const saveOtp = async (email, otp) => {
     return await OTP.create({
         email,
         otp,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
     });
 };
 
