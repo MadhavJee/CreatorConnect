@@ -2,9 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { useAuth } from '../context/AuthContext';
+import toast from 'react-hot-toast';
 import {
-    fetchAssets, uploadAssetThunk, deleteAssetThunk,
-    selectAssets, selectAssetsLoading, selectUploading, selectAssetError, clearError
+    fetchAssets,
+    uploadAssetThunk,
+    deleteAssetThunk,
+    selectAssets,
+    selectAssetsLoading,
+    selectUploading,
 } from '../store/slices/assetSlice';
 import styles from './Dashboard.module.css';
 
@@ -17,7 +22,6 @@ export default function Dashboard() {
     const assets = useSelector(selectAssets);
     const loading = useSelector(selectAssetsLoading);
     const uploading = useSelector(selectUploading);
-    const error = useSelector(selectAssetError);
 
     const [activeTab, setActiveTab] = useState('assets');
     const [messages, setMessages] = useState([
@@ -33,14 +37,26 @@ export default function Dashboard() {
     const handleUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
         const formData = new FormData();
         formData.append('file', file);
-        dispatch(uploadAssetThunk(formData));
+
+        const result = await dispatch(uploadAssetThunk(formData));
+        if (uploadAssetThunk.fulfilled.match(result)) {
+            toast.success('Image uploaded successfully!');
+        } else {
+            toast.error(result.payload || 'Upload failed');
+        }
         fileRef.current.value = '';
     };
 
-    const handleDelete = (id) => {
-        dispatch(deleteAssetThunk(id));
+    const handleDelete = async (id) => {
+        const result = await dispatch(deleteAssetThunk(id));
+        if (deleteAssetThunk.fulfilled.match(result)) {
+            toast.success('Asset deleted!');
+        } else {
+            toast.error(result.payload || 'Delete failed');
+        }
     };
 
     const handleDownload = (url, filename) => {
@@ -49,6 +65,7 @@ export default function Dashboard() {
         a.download = filename;
         a.target = '_blank';
         a.click();
+        toast.success('Downloading...');
     };
 
     const handleSend = async (e) => {
@@ -59,7 +76,8 @@ export default function Dashboard() {
         setChatLoading(true);
         setTimeout(() => {
             setMessages(prev => [...prev, {
-                id: Date.now() + 1, from: 'bot',
+                id: Date.now() + 1,
+                from: 'bot',
                 text: 'Chat API not connected yet!'
             }]);
             setChatLoading(false);
@@ -68,38 +86,51 @@ export default function Dashboard() {
 
     const handleLogout = () => {
         logout();
+        toast.success('Logged out!');
         navigate('/login');
     };
 
     return (
         <div className={styles.container}>
+            {/* Sidebar */}
             <div className={styles.sidebar}>
                 <div className={styles.sidebarHeader}>
                     <div className={styles.logo}>CC</div>
                     <span className={styles.appName}>Creator Connect</span>
                 </div>
+
                 <nav className={styles.nav}>
                     <div
                         className={`${styles.navItem} ${activeTab === 'assets' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('assets')}
-                    > Assets</div>
+                    >
+                         Assets
+                    </div>
                     <div
                         className={`${styles.navItem} ${activeTab === 'chat' ? styles.navActive : ''}`}
                         onClick={() => setActiveTab('chat')}
-                    > Chat</div>
+                    >
+                         Chat
+                    </div>
                 </nav>
+
                 <div className={styles.sidebarBottom}>
                     <div className={styles.userInfo}>
-                        <div className={styles.avatar}>{user?.name?.charAt(0).toUpperCase()}</div>
+                        <div className={styles.avatar}>
+                            {user?.name?.charAt(0).toUpperCase()}
+                        </div>
                         <div>
                             <p className={styles.userName}>{user?.name}</p>
                             <p className={styles.userRole}>{user?.role}</p>
                         </div>
                     </div>
-                    <button className={styles.logoutBtn} onClick={handleLogout}>Sign out</button>
+                    <button className={styles.logoutBtn} onClick={handleLogout}>
+                        Sign out
+                    </button>
                 </div>
             </div>
 
+            {/* Main Content */}
             <div className={styles.main}>
                 {activeTab === 'assets' ? (
                     <>
@@ -109,7 +140,9 @@ export default function Dashboard() {
                                 <p className={styles.subtitle}>{assets.length} files uploaded</p>
                             </div>
                             <div className={styles.headerActions}>
-                                <span className={styles.tokenBadge}> {user?.tokens || 5} tokens</span>
+                                <span className={styles.tokenBadge}>
+                                     {user?.tokens || 5} tokens
+                                </span>
                                 <button
                                     className={styles.uploadBtn}
                                     onClick={() => fileRef.current.click()}
@@ -127,19 +160,18 @@ export default function Dashboard() {
                             </div>
                         </div>
 
-                        {error && (
-                            <p className={styles.error} onClick={() => dispatch(clearError())}>
-                                 {error} (click to dismiss)
-                            </p>
-                        )}
-
                         {loading ? (
-                            <div className={styles.emptyState}><p>Loading...</p></div>
+                            <div className={styles.emptyState}>
+                                <p>Loading...</p>
+                            </div>
                         ) : assets.length === 0 ? (
                             <div className={styles.emptyState}>
                                 
                                 <p>No assets yet</p>
-                                <button className={styles.uploadBtn} onClick={() => fileRef.current.click()}>
+                                <button
+                                    className={styles.uploadBtn}
+                                    onClick={() => fileRef.current.click()}
+                                >
                                     Upload your first file
                                 </button>
                             </div>
@@ -159,11 +191,15 @@ export default function Dashboard() {
                                                 <button
                                                     className={styles.downloadBtn}
                                                     onClick={() => handleDownload(asset.url, asset.filename)}
-                                                >⬇ Download</button>
+                                                >
+                                                     Download
+                                                </button>
                                                 <button
                                                     className={styles.deleteBtn}
                                                     onClick={() => handleDelete(asset._id)}
-                                                >🗑 Delete</button>
+                                                >
+                                                     Delete
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -175,7 +211,9 @@ export default function Dashboard() {
                     <div className={styles.chatContainer}>
                         <div className={styles.header}>
                             <h1>Chat</h1>
-                            <span className={styles.tokenBadge}> {user?.tokens || 5} tokens</span>
+                            <span className={styles.tokenBadge}>
+                                 {user?.tokens || 5} tokens
+                            </span>
                         </div>
                         <div className={styles.messages}>
                             {messages.map(msg => (
@@ -192,7 +230,9 @@ export default function Dashboard() {
                                 <div className={`${styles.message} ${styles.bot}`}>
                                     <div className={styles.msgAvatar}>CC</div>
                                     <div className={styles.msgBubble}>
-                                        <span className={styles.typing}><span /><span /><span /></span>
+                                        <span className={styles.typing}>
+                                            <span /><span /><span />
+                                        </span>
                                     </div>
                                 </div>
                             )}
@@ -205,7 +245,11 @@ export default function Dashboard() {
                                 onChange={e => setInput(e.target.value)}
                                 className={styles.chatInput}
                             />
-                            <button type="submit" className={styles.sendBtn} disabled={chatLoading || !input.trim()}>
+                            <button
+                                type="submit"
+                                className={styles.sendBtn}
+                                disabled={chatLoading || !input.trim()}
+                            >
                                 Send →
                             </button>
                         </form>
