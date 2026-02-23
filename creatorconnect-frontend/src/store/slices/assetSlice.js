@@ -1,100 +1,94 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { getAssets, uploadAsset, deleteAsset } from '../../services/api';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
+import { getMyAssets, getPublicAssets } from '../../api/assetApi'
 
-// Thunks
-export const fetchAssets = createAsyncThunk(
-    'assets/fetchAll',
-    async (_, { rejectWithValue }) => {
-        try {
-            const res = await getAssets();
-            return res.data.assets;
-        } catch (err) {
-            return rejectWithValue(err.response?.data?.message || 'Failed to fetch assets');
-        }
+export const fetchAssetsData = createAsyncThunk(
+  'asset/fetchAssetsData',
+  async (_, thunkApi) => {
+    try {
+      const [publicResponse, myResponse] = await Promise.all([getPublicAssets(), getMyAssets()])
+      return {
+        publicAssets: publicResponse?.data || [],
+        myAssets: myResponse?.data || [],
+      }
+    } catch (error) {
+      return thunkApi.rejectWithValue(error.message || 'Could not load assets')
     }
-);
+  },
+  {
+    condition: (_, { getState }) => {
+      const { asset } = getState()
+      return !asset.hasLoaded && !asset.isLoadingAssets
+    },
+  },
+)
 
-export const uploadAssetThunk = createAsyncThunk(
-    'assets/upload',
-    async (formData, { rejectWithValue }) => {
-        try {
-            const res = await uploadAsset(formData);
-            return res.data.asset;
-        } catch (err) {
-            return rejectWithValue(err.response?.data?.message || 'Upload failed');
-        }
-    }
-);
-
-export const deleteAssetThunk = createAsyncThunk(
-    'assets/delete',
-    async (id, { rejectWithValue }) => {
-        try {
-            await deleteAsset(id);
-            return id;
-        } catch (err) {
-            return rejectWithValue(err.response?.data?.message || 'Delete failed');
-        }
-    }
-);
+const initialState = {
+  activeTab: 'home',
+  publicAssets: [],
+  myAssets: [],
+  isLoadingAssets: false,
+  loadingError: '',
+  hasLoaded: false,
+}
 
 const assetSlice = createSlice({
-    name: 'assets',
-    initialState: {
-        assets: [],
-        loading: false,
-        uploading: false,
-        error: null,
+  name: 'asset',
+  initialState,
+  reducers: {
+    setActiveTab: (state, action) => {
+      state.activeTab = action.payload
     },
-    reducers: {
-        clearError: (state) => {
-            state.error = null;
-        },
+    setLoadingError: (state, action) => {
+      state.loadingError = action.payload
     },
-    extraReducers: (builder) => {
-        // Fetch
-        builder.addCase(fetchAssets.pending, (state) => {
-            state.loading = true;
-            state.error = null;
-        });
-        builder.addCase(fetchAssets.fulfilled, (state, action) => {
-            state.loading = false;
-            state.assets = action.payload;
-        });
-        builder.addCase(fetchAssets.rejected, (state, action) => {
-            state.loading = false;
-            state.error = action.payload;
-        });
-
-        // Upload
-        builder.addCase(uploadAssetThunk.pending, (state) => {
-            state.uploading = true;
-            state.error = null;
-        });
-        builder.addCase(uploadAssetThunk.fulfilled, (state, action) => {
-            state.uploading = false;
-            state.assets.unshift(action.payload);
-        });
-        builder.addCase(uploadAssetThunk.rejected, (state, action) => {
-            state.uploading = false;
-            state.error = action.payload;
-        });
-
-        // Delete
-        builder.addCase(deleteAssetThunk.fulfilled, (state, action) => {
-            state.assets = state.assets.filter(a => a._id !== action.payload);
-        });
-        builder.addCase(deleteAssetThunk.rejected, (state, action) => {
-            state.error = action.payload;
-        });
+    clearLoadingError: (state) => {
+      state.loadingError = ''
     },
-});
+    prependCreatedAsset: (state, action) => {
+      const createdAsset = action.payload
+      state.myAssets = [createdAsset, ...state.myAssets]
+      if (createdAsset.visibility === 'public') {
+        state.publicAssets = [createdAsset, ...state.publicAssets]
+      }
+    },
+    removeAssetOptimistic: (state, action) => {
+      const assetId = action.payload
+      state.myAssets = state.myAssets.filter((asset) => asset.id !== assetId)
+      state.publicAssets = state.publicAssets.filter((asset) => asset.id !== assetId)
+    },
+    restoreAssetsState: (state, action) => {
+      state.myAssets = action.payload.myAssets || []
+      state.publicAssets = action.payload.publicAssets || []
+    },
+    resetAssetsState: () => initialState,
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchAssetsData.pending, (state) => {
+        state.isLoadingAssets = true
+        state.loadingError = ''
+      })
+      .addCase(fetchAssetsData.fulfilled, (state, action) => {
+        state.isLoadingAssets = false
+        state.publicAssets = action.payload.publicAssets
+        state.myAssets = action.payload.myAssets
+        state.hasLoaded = true
+      })
+      .addCase(fetchAssetsData.rejected, (state, action) => {
+        state.isLoadingAssets = false
+        state.loadingError = action.payload || 'Could not load assets'
+      })
+  },
+})
 
-export const { clearError } = assetSlice.actions;
-export default assetSlice.reducer;
+export const {
+  setActiveTab,
+  setLoadingError,
+  clearLoadingError,
+  prependCreatedAsset,
+  removeAssetOptimistic,
+  restoreAssetsState,
+  resetAssetsState,
+} = assetSlice.actions
 
-// Selectors
-export const selectAssets = (state) => state.assets.assets;
-export const selectAssetsLoading = (state) => state.assets.loading;
-export const selectUploading = (state) => state.assets.uploading;
-export const selectAssetError = (state) => state.assets.error;
+export default assetSlice.reducer

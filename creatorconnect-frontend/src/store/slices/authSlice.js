@@ -1,33 +1,74 @@
-import { createSlice } from '@reduxjs/toolkit';
+import { createSlice } from '@reduxjs/toolkit'
 
-const user = localStorage.getItem('user');
-const token = localStorage.getItem('token');
+const token = localStorage.getItem('auth_token')
+const savedProfileRaw = localStorage.getItem('auth_user')
+
+let savedProfile = null
+try {
+  savedProfile = savedProfileRaw ? JSON.parse(savedProfileRaw) : null
+} catch {
+  savedProfile = null
+}
+
+const initialState = {
+  page: token ? 'home' : 'signup',
+  pendingEmail: savedProfile?.email || '',
+  currentUserEmail: savedProfile?.email || '',
+  currentUserName: savedProfile?.name || '',
+  authError: '',
+  authMessage: '',
+  isLoading: false,
+}
 
 const authSlice = createSlice({
-    name: 'auth',
-    initialState: {
-        user: user ? JSON.parse(user) : null,
-        token: token || null,
+  name: 'auth',
+  initialState,
+  reducers: {
+    setPage: (state, action) => {
+      state.page = action.payload
     },
-    reducers: {
-        setCredentials: (state, action) => {
-            state.user = action.payload.user;
-            state.token = action.payload.token;
-            localStorage.setItem('user', JSON.stringify(action.payload.user));
-            localStorage.setItem('token', action.payload.token);
-        },
-        clearCredentials: (state) => {
-            state.user = null;
-            state.token = null;
-            localStorage.removeItem('user');
-            localStorage.removeItem('token');
-        },
+    setPendingEmail: (state, action) => {
+      state.pendingEmail = action.payload
     },
-});
+    setCurrentUser: (state, action) => {
+      state.currentUserEmail = action.payload.email || ''
+      state.currentUserName = action.payload.name || ''
+    },
+    setAuthError: (state, action) => {
+      state.authError = action.payload
+    },
+    setAuthMessage: (state, action) => {
+      state.authMessage = action.payload
+    },
+    clearNotices: (state) => {
+      state.authError = ''
+      state.authMessage = ''
+    },
+    setIsLoading: (state, action) => {
+      state.isLoading = action.payload
+    },
+    resetAuthState: () => ({
+      ...initialState,
+      page: 'login',
+      pendingEmail: '',
+      currentUserEmail: '',
+      currentUserName: '',
+      authError: '',
+      authMessage: '',
+      isLoading: false,
+    }),
+  },
+})
 
-export const { setCredentials, clearCredentials } = authSlice.actions;
-export default authSlice.reducer;
+export const {
+  setPage,
+  setPendingEmail,
+  setCurrentUser,
+  setAuthError,
+  setAuthMessage,
+  clearNotices,
+  setIsLoading,
+  resetAuthState,
+} = authSlice.actions
 
-// Selectors
-export const selectUser = (state) => state.auth.user;
-export const selectToken = (state) => state.auth.token;
+export default authSlice.reducer
