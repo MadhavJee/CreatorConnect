@@ -7,8 +7,10 @@ import {
   sendChatMessage,
 } from '../api/chatApi'
 import { ApiError } from '../api/client'
+import useTypingIndicator from '../hooks/useTypingIndicator'
 
 const SOCKET_EVENT = 'chat:message'
+const COINS_PER_MESSAGE = 1
 
 const toArray = (value) => {
   if (Array.isArray(value)) return value
@@ -70,6 +72,7 @@ const normalizeConversation = (rawConversation = {}) => {
 
   return {
     id: user.id,
+    conversationId: String(rawConversation.conversationId || rawConversation.threadId || ''),
     user,
     lastMessageText,
     updatedAt,
@@ -103,6 +106,9 @@ const getChatErrorMessage = (error, fallbackMessage) => {
     if (error.status === 404) {
       return 'Chat endpoint not found. Confirm backend chat routes are available.'
     }
+    if (error.status === 402) {
+      return 'Insufficient coins. Buy a plan to continue messaging.'
+    }
   }
   return error?.message || fallbackMessage
 }
@@ -119,7 +125,15 @@ const resolveSocketUrl = () => {
   return window.location.origin
 }
 
-function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
+function ChatInbox({
+  token,
+  currentUserEmail,
+  currentUserId = '',
+  initialSelectedUser = null,
+  coinBalance = 0,
+  onCoinBalanceChange,
+  onOpenPlans,
+}) {
   const [conversations, setConversations] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
   const [messages, setMessages] = useState([])
@@ -134,6 +148,8 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
   const [userSearch, setUserSearch] = useState('')
   const [isSearchingUsers, setIsSearchingUsers] = useState(false)
   const [userResults, setUserResults] = useState([])
+  const [socketInstance, setSocketInstance] = useState(null)
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(true)
   const endOfMessagesRef = useRef(null)
   const selectedUserRef = useRef(null)
 
@@ -141,6 +157,28 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
   const socketAuthToken = resolvedToken.startsWith('Bearer ') ? resolvedToken : `Bearer ${resolvedToken}`
 
   const selectedConversationTitle = selectedUser?.name || 'Conversation'
+  const canSendMessage = coinBalance >= COINS_PER_MESSAGE
+  const currentConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === selectedUser?.id),
+    [conversations, selectedUser],
+  )
+  const activeChat = useMemo(
+    () =>
+      selectedUser
+        ? {
+            id: selectedUser.id,
+            userId: selectedUser.id,
+            receiverId: selectedUser.id,
+            conversationId: currentConversation?.conversationId || null,
+          }
+        : null,
+    [selectedUser, currentConversation?.conversationId],
+  )
+  const { isPeerTyping, handleInputChange, handleInputBlur, handleMessageSent } = useTypingIndicator(
+    socketInstance,
+    activeChat,
+    currentUserId,
+  )
 
   const loadInbox = useCallback(async () => {
     if (!resolvedToken) return
@@ -179,6 +217,7 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
       const existing = prevConversations.find((entry) => entry.id === user.id)
       const next = {
         id: user.id,
+        conversationId: existing?.conversationId || '',
         user,
         lastMessageText: previewText,
         updatedAt: previewTime,
@@ -191,7 +230,9 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
 
   const handleSelectUser = (user) => {
     if (!user?.id) return
+    if (selectedUser?.id === user.id) return
     setSelectedUser(user)
+    setIsMobileSidebarOpen(false)
     setMessages([])
     setMessagesError('')
     setIsPickerOpen(false)
@@ -203,8 +244,13 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
   const handleSendMessage = async (event) => {
     event.preventDefault()
     if (!resolvedToken || !selectedUser?.id || !draftMessage.trim() || isSendingMessage) return
+    if (!canSendMessage) {
+      setMessagesError('Insufficient coins. Buy a plan to continue messaging.')
+      return
+    }
 
     const content = draftMessage.trim()
+    handleMessageSent()
     const optimisticId = `temp-${Date.now()}`
     const optimisticMessage = {
       id: optimisticId,
@@ -227,6 +273,13 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
         receiverId: selectedUser.id,
         body: content,
       })
+      const wallet = response?.data?.wallet || response?.wallet || {}
+      const nextCoinBalance = Number(wallet.remainingCoins ?? wallet.coins ?? wallet.balance)
+      if (Number.isFinite(nextCoinBalance)) {
+        onCoinBalanceChange?.(nextCoinBalance)
+      } else {
+        onCoinBalanceChange?.(Math.max(0, coinBalance - COINS_PER_MESSAGE))
+      }
       const persistedMessage = normalizeMessage(response?.data || response?.message || {})
       setMessages((prevMessages) =>
         prevMessages.map((entry) => (entry.id === optimisticId ? { ...persistedMessage, pending: false } : entry)),
@@ -273,7 +326,7 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
 
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, isPeerTyping])
 
   useEffect(() => {
     selectedUserRef.current = selectedUser
@@ -288,6 +341,7 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
       auth: { token: socketAuthToken },
       transports: ['polling', 'websocket'],
     })
+    setSocketInstance(socket)
 
     socket.on('connect', () => {
       console.log('socket connected', socket.id)
@@ -333,13 +387,9 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
       socket.off('connect_error')
       socket.off(SOCKET_EVENT)
       socket.disconnect()
+      setSocketInstance(null)
     }
   }, [resolvedToken, socketAuthToken, currentUserEmail, loadInbox])
-
-  const currentConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === selectedUser?.id),
-    [conversations, selectedUser],
-  )
 
   useEffect(() => {
     if (!initialSelectedUser?.id) return
@@ -366,7 +416,7 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
 
   return (
     <section className="chat-inbox-wrap">
-      <aside className="chat-sidebar">
+      <aside className={`chat-sidebar ${isMobileSidebarOpen ? 'open' : ''}`}>
         <div className="chat-sidebar-head">
           <h2>Inbox</h2>
           <button type="button" className="nav-link chat-new-chat-btn" onClick={() => setIsPickerOpen((prev) => !prev)}>
@@ -437,8 +487,24 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
           <>
             <header className="chat-thread-head">
               <div>
-                <h3>{selectedConversationTitle}</h3>
+                <h3>
+                  {selectedConversationTitle}
+                  {isPeerTyping && <span className="chat-name-status">Typing...</span>}
+                </h3>
               </div>
+              <button
+                type="button"
+                className="chat-mobile-toggle"
+                onClick={() => setIsMobileSidebarOpen((prev) => !prev)}
+                aria-expanded={isMobileSidebarOpen}
+                aria-label="Toggle inbox conversations"
+              >
+                <span className="chat-mobile-toggle-icon" aria-hidden="true">
+                  {isMobileSidebarOpen ? '=' : '?'}
+                </span>
+                <span className="chat-mobile-toggle-name">{selectedConversationTitle}</span>
+                {isPeerTyping && <span className="chat-mobile-toggle-status">Typing...</span>}
+              </button>
               {currentConversation?.unreadCount > 0 && (
                 <span className="chat-unread-inline">{currentConversation.unreadCount} unread</span>
               )}
@@ -464,6 +530,11 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
                   </article>
                 )
               })}
+              {isPeerTyping && (
+                <article className="chat-message chat-message--typing" aria-live="polite">
+                  <p>Typing...</p>
+                </article>
+              )}
               <div ref={endOfMessagesRef} />
             </div>
 
@@ -471,13 +542,27 @@ function ChatInbox({ token, currentUserEmail, initialSelectedUser = null }) {
               <input
                 type="text"
                 value={draftMessage}
-                onChange={(event) => setDraftMessage(event.target.value)}
+                onChange={(event) => {
+                  const nextValue = event.target.value
+                  setDraftMessage(nextValue)
+                  handleInputChange(nextValue)
+                }}
+                onBlur={handleInputBlur}
                 placeholder="Type a message"
+                disabled={!canSendMessage}
               />
-              <button type="submit" disabled={isSendingMessage || !draftMessage.trim()}>
-                {isSendingMessage ? 'Sending...' : 'Send'}
+              <button type="submit" disabled={isSendingMessage || !draftMessage.trim() || !canSendMessage}>
+                {isSendingMessage ? 'Sending...' : canSendMessage ? 'Send (1 coin)' : 'No Coins'}
               </button>
             </form>
+            {!canSendMessage && (
+              <div className="chat-coin-warning">
+                <span>Coins finished. Buy a plan to continue sending messages.</span>
+                <button type="button" className="chat-coin-warning-btn" onClick={onOpenPlans}>
+                  View Plans
+                </button>
+              </div>
+            )}
           </>
         )}
       </section>
